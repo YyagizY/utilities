@@ -122,9 +122,9 @@ def has_uncommitted_changes(repo_dir: Path) -> bool:
     return bool(result.stdout.strip())
 
 
-def fetch_tags(repo_dir: Path) -> None:
+def fetch_remote(repo_dir: Path) -> None:
     subprocess.run(
-        ["git", "fetch", "--tags"],
+        ["git", "fetch", "--all", "--tags"],
         cwd=repo_dir,
         capture_output=True,
     )
@@ -134,7 +134,7 @@ def checkout(repo_dir: Path, version: str | None) -> None:
     if has_uncommitted_changes(repo_dir):
         print(f"  ! {repo_dir.name} → skipped (uncommitted changes)")
         return
-    fetch_tags(repo_dir)
+    fetch_remote(repo_dir)
     if version:
         tag = f"v{version}"
     else:
@@ -186,7 +186,7 @@ def main() -> None:
         transitive = parse_setup_cfg_requires(rocks_noob_repo / "setup.cfg")
         constraint = transitive.get("invent-noob")
         if constraint:
-            fetch_tags(noob_repo)
+            fetch_remote(noob_repo)
             tag = best_tag_for_constraint(noob_repo, constraint)
             if tag:
                 if has_uncommitted_changes(noob_repo):
