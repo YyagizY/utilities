@@ -1,9 +1,9 @@
 # ABOUTME: Parses client repo requirements files and checks out matching
 # ABOUTME: versions of product libraries under /Desktop/repos/products/
 
+import configparser
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 PRODUCTS_DIR = Path("/Users/yagiz.yaman/Desktop/repos/products")
@@ -62,6 +62,54 @@ def latest_tag(repo_dir: Path) -> str | None:
     )
     tags = [t.strip() for t in result.stdout.splitlines() if t.strip()]
     return tags[0] if tags else None
+
+
+def best_tag_for_constraint(repo_dir: Path, constraint: str) -> str | None:
+    """Return the latest tag in repo_dir satisfying a PEP 440 constraint string.
+
+    constraint examples: '>=1.15.0,<2.0.0'  '>=1.0'
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version, InvalidVersion
+
+    spec = SpecifierSet(constraint)
+    result = subprocess.run(
+        ["git", "tag", "--sort=-version:refname"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    for raw in result.stdout.splitlines():
+        tag = raw.strip()
+        ver_str = tag.lstrip("v")
+        try:
+            if Version(ver_str) in spec:
+                return tag
+        except InvalidVersion:
+            continue
+    return None
+
+
+def parse_setup_cfg_requires(setup_cfg: Path) -> dict[str, str]:
+    """Extract {normalised-package-name: constraint} from install_requires in setup.cfg."""
+    if not setup_cfg.exists():
+        return {}
+    cfg = configparser.ConfigParser()
+    cfg.read(setup_cfg)
+    raw = cfg.get("options", "install_requires", fallback="")
+    requires = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # split on first >= <= != == ~= < >
+        match = re.match(r"^([\w\-\.]+)((?:[><=!~][^;#\s]+)*)", line)
+        if match:
+            pkg = re.sub(r"[-_.]", "-", match.group(1).lower())
+            constraint = match.group(2).strip()
+            if constraint:
+                requires[pkg] = constraint
+    return requires
 
 
 def has_uncommitted_changes(repo_dir: Path) -> bool:
@@ -129,6 +177,33 @@ def main() -> None:
         version = versions.get(pkg.lower())
         checkout(repo_dir, version)
         checked.add(repo_name)
+
+    # Sync invent-noob transitively: read the constraint declared by rocks-noob
+    # and checkout the latest matching tag. rocks-noob must be synced first (above).
+    noob_repo = PRODUCTS_DIR / "noob"
+    rocks_noob_repo = PRODUCTS_DIR / "rocks-noob"
+    if noob_repo.exists() and rocks_noob_repo.exists():
+        transitive = parse_setup_cfg_requires(rocks_noob_repo / "setup.cfg")
+        constraint = transitive.get("invent-noob")
+        if constraint:
+            fetch_tags(noob_repo)
+            tag = best_tag_for_constraint(noob_repo, constraint)
+            if tag:
+                if has_uncommitted_changes(noob_repo):
+                    print(f"  ! noob → skipped (uncommitted changes)")
+                else:
+                    result = subprocess.run(
+                        ["git", "checkout", tag],
+                        cwd=noob_repo,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode == 0:
+                        print(f"  ✓ noob → {tag} (via rocks-noob constraint: {constraint})")
+                    else:
+                        print(f"  ✗ noob → {tag} failed: {result.stderr.strip()}")
+            else:
+                print(f"  ! noob → no tag satisfies rocks-noob constraint ({constraint})")
 
 
 if __name__ == "__main__":
