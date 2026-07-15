@@ -14,6 +14,7 @@ PRODUCTS_DIR = Path("/Users/yagiz.yaman/Desktop/repos/products")
 PACKAGE_TO_REPO = {
     "invent-rocks.future-visibility": "rocks-future-visibility",
     "invent-rocks.reporting": "rocks-reporting",
+    "invent-rocks.acme": "rocks-acme",
     "invent-rocks.rocket": "rocks-rocket",
     "invent-rocks.noob": "rocks-noob",
     "invent-rocks.opal": "rocks-opal",
@@ -155,6 +156,48 @@ def checkout(repo_dir: Path, version: str | None) -> None:
         print(f"  ✗ {repo_dir.name} → {tag} failed: {result.stderr.strip()}")
 
 
+def default_branch(repo_dir: Path) -> str:
+    """Return the repo's default branch name (origin/HEAD), falling back to master."""
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    ref = result.stdout.strip()
+    if ref.startswith("origin/"):
+        return ref[len("origin/") :]
+    return "master"
+
+
+def checkout_latest_branch(repo_dir: Path) -> None:
+    """Sync a branch-tracked repo (no version tags/pin) to the latest default branch."""
+    if has_uncommitted_changes(repo_dir):
+        print(f"  ! {repo_dir.name} → skipped (uncommitted changes)")
+        return
+    fetch_remote(repo_dir)
+    branch = default_branch(repo_dir)
+    checkout_result = subprocess.run(
+        ["git", "checkout", branch],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    if checkout_result.returncode != 0:
+        print(f"  ✗ {repo_dir.name} → {branch} failed: {checkout_result.stderr.strip()}")
+        return
+    reset_result = subprocess.run(
+        ["git", "reset", "--hard", f"origin/{branch}"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    if reset_result.returncode == 0:
+        print(f"  ✓ {repo_dir.name} → {branch} (latest)")
+    else:
+        print(f"  ✗ {repo_dir.name} → {branch} failed: {reset_result.stderr.strip()}")
+
+
 def main() -> None:
     client_dir = Path.cwd()
     print(f"Client: {client_dir.name}\n")
@@ -204,6 +247,12 @@ def main() -> None:
                         print(f"  ✗ noob → {tag} failed: {result.stderr.strip()}")
             else:
                 print(f"  ! noob → no tag satisfies rocks-noob constraint ({constraint})")
+
+    # Sync the standalone acme repo: it has no version tags and is not pinned in
+    # requirements or by rocks-acme, so track the latest default branch instead.
+    acme_repo = PRODUCTS_DIR / "acme"
+    if acme_repo.exists():
+        checkout_latest_branch(acme_repo)
 
 
 if __name__ == "__main__":
