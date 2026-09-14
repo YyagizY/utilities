@@ -42,6 +42,26 @@ def parse_requirements(filepath: Path) -> dict[str, str]:
     return versions
 
 
+def report_divergence(
+        airflow_versions: dict[str, str],
+        spark_versions: dict[str, str]
+) -> None:
+    """Print packages the two requirements files pin to different versions."""
+    diverged = {
+        pkg: (airflow_versions[pkg], spark_versions[pkg])
+        for pkg in airflow_versions.keys() & spark_versions.keys()
+        if airflow_versions[pkg] != spark_versions[pkg]
+    }
+    if not diverged:
+        return
+    print("  ! requirements-spark and requirements-airflow disagree:")
+    for pkg in sorted(diverged):
+        airflow_version, spark_version = diverged[pkg]
+        print(f"      {pkg}: airflow {airflow_version} vs spark {spark_version}"
+              f" → using {spark_version}")
+    print()
+
+
 def parse_fabbrica_version(filepath: Path) -> str | None:
     """Extract rocket_pandas version from fabbrica.yaml."""
     if not filepath.exists():
@@ -202,9 +222,17 @@ def main() -> None:
     client_dir = Path.cwd()
     print(f"Client: {client_dir.name}\n")
 
+    # Spark wins collisions: the library source read from products/ is the
+    # compute implementation, which runs on Spark. Airflow only imports the
+    # pipeline definitions to build DAG shape.
+    airflow_versions = parse_requirements(client_dir / "requirements-airflow.txt")
+    spark_versions = parse_requirements(client_dir / "requirements-spark.txt")
+
     versions: dict[str, str] = {}
-    versions.update(parse_requirements(client_dir / "requirements-spark.txt"))
-    versions.update(parse_requirements(client_dir / "requirements-airflow.txt"))
+    versions.update(airflow_versions)
+    versions.update(spark_versions)
+
+    report_divergence(airflow_versions, spark_versions)
 
     rp_version = parse_fabbrica_version(client_dir / "dags" / "fabbrica.yaml")
     if rp_version:
