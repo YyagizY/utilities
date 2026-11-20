@@ -1,5 +1,9 @@
 #!/bin/zsh
 
+CLAUDE_BIN="/Users/yagiz.yaman/.local/bin/claude"
+
+[[ -t 0 ]] || exec "$CLAUDE_BIN" "$@"
+
 MCP_PROFILES_DIR="/Users/yagiz.yaman/Desktop/repos/utilities/mcp-profiles"
 
 # Parse --profile / -P and --no-prompt before passing remaining args to claude
@@ -57,11 +61,6 @@ fi
 
 if echo "$PWD" | grep -qi '/Desktop/repos/clients/'; then
   echo "Syncing library versions..."
-  find /Users/yagiz.yaman/Desktop/repos/products -maxdepth 1 -mindepth 1 -type d | while read repo; do
-    git -C "$repo" checkout . 2>/dev/null
-    git -C "$repo" reset --hard 2>/dev/null
-    git -C "$repo" clean -fd 2>/dev/null
-  done
   python3 /Users/yagiz.yaman/Desktop/repos/utilities/sync-libs.py
   echo "Sync complete."
 fi
@@ -76,8 +75,8 @@ if [[ -n "$PROFILE" ]]; then
   fi
   PROFILE_LABEL="$(python3 -c "import json; d=json.load(open('$PROFILE_FILE')); print(d.get('_label', '$PROFILE'))" 2>/dev/null || echo "$PROFILE")"
   echo "Starting Claude — MCP: ${PROFILE_LABEL}."
-  claude --mcp-config "$PROFILE_FILE" --strict-mcp-config "${CLAUDE_ARGS[@]}"
+  "$CLAUDE_BIN" --mcp-config "$PROFILE_FILE" --strict-mcp-config "${CLAUDE_ARGS[@]}"
 else
   echo "Starting Claude — MCP: all servers."
-  claude "${CLAUDE_ARGS[@]}"
+  "$CLAUDE_BIN" "${CLAUDE_ARGS[@]}"
 fi
